@@ -1,0 +1,121 @@
+---
+title: "727-HW3"
+author: "Yuchen Ding"
+date: "2024-10-08"
+output:
+  pdf_document: default
+  html_document: default
+encoding: UTF-8
+---
+
+```{r setup, include=FALSE, tidy=TRUE}
+knitr::knit_hooks$set(document = function(x) {
+  gsub("−", "-", x)
+})
+options(repos = c(CRAN = "https://cran.r-project.org"))
+library(xml2)
+library(rvest)
+library(tidyverse)
+knitr::opts_chunk$set(echo = TRUE,cache=TRUE, 
+                      autodep=TRUE, cache.comments=FALSE,
+                      message=FALSE, warning=FALSE,
+                      fig.width=4.5, fig.height=3.5)
+```
+
+
+## Web Scraping
+```{r}
+url <- read_html("https://en.wikipedia.org/wiki/Grand_Boulevard,_Chicago")
+tables <- html_table(url, fill = TRUE)
+str(tables)
+
+pop <- tables[[2]][c("Census","Pop.")]
+pop <- pop[-11, ]
+pop$area <- "Grand_Boulevard"
+```
+
+
+## Expanding to More Pages
+```{r}
+adjacent <- tables[[4]][c("X1","X2","X3")]
+adjacent <- adjacent[-c(2,4), ]
+adjacent
+
+east_of_grand <- c(adjacent$X3)
+print(east_of_grand)
+
+east_of_grand <- gsub(" ", "_", east_of_grand)
+east_of_grand
+pops <- pop
+
+url0 <- "https://en.wikipedia.org/wiki/"
+
+for (i in east_of_grand){
+  urls <- paste0(url0, i)
+  pages <- read_html(urls)
+  tables <- html_table(pages, fill = TRUE)
+  pop_tables <- tables[[2]][c("Census","Pop.")]
+  pop_tables <- pop_tables[-nrow(pop_tables), ]
+  
+  pop_tables <- pop_tables %>%
+    mutate(area = i)
+
+  pops <- bind_rows(pops, pop_tables)
+}
+
+pops
+ 
+```
+
+
+## Scraping and Analyzing Text Data
+```{r}
+library(rvest)
+library(dplyr)
+library(tidytext)
+
+locations <- c("Armour Square, Chicago",	"Douglas, Chicago", "Oakland, Chicago", "Fuller Park, Chicago",	"Grand Boulevard, Chicago",	"Kenwood, Chicago", "New City, Chicago", "Washington Park, Chicago",	"Hyde Park, Chicago")
+locations <- gsub(" ", "_", locations)
+location_data <- tibble(Location = character(), Description = character())
+
+for (i in locations){
+  urls <- paste0(url0, i)
+  pages <- read_html(urls)
+  description <- pages %>%
+    html_nodes("p") %>%      
+    html_text() %>%          
+    paste(collapse = " ")
+
+  location_data <- location_data %>%
+    add_row(Location = i, Description = description)
+}
+
+print(location_data)
+
+location_words <- location_data %>%
+  unnest_tokens(word, Description)
+
+data(stop_words) 
+location_words <- location_words %>%
+  anti_join(stop_words, by = "word")
+
+location_words %>%
+  count(Location, word, sort = TRUE)
+
+
+counts <- location_words %>%
+  count(Location, word, sort = TRUE) %>%
+  group_by(Location) %>%
+  top_n(10, n)
+
+library(ggplot2)
+ggplot(counts, 
+       aes(x = reorder(word, n), y = n, 
+           fill = Location)) +
+  geom_col() +
+  facet_wrap(~ Location, scales = "free_y") +  
+  labs(x = "Word", y = "Frequency") +
+  coord_flip() +
+  theme_minimal() +
+  ggtitle("Most Common Words by Location")
+```
