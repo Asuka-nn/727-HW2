@@ -1,0 +1,138 @@
+---
+title: "HW3"
+author: "KailinXu"
+date: "2024-10-04"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE}
+library(xml2)
+library(rvest)
+library(tidyverse)
+library(robotstxt)
+library(dplyr)
+library(tidytext)
+library(scales)
+```
+
+
+```{r}
+paths_allowed('https://en.wikipedia.org/wiki/Grand_Boulevard,_Chicago')
+gbc <- read_html('https://en.wikipedia.org/wiki/Grand_Boulevard,_Chicago')
+hp <- html_nodes(gbc, xpath ='//*[@id="mw-content-text"]/div[1]/table[2]')
+str(hp)
+```
+
+
+```{r}
+his_p <- html_table(hp)
+his_p2 <- as.data.frame(his_p)
+hp_clean <- his_p2[-nrow(his_p2),-3]
+names(hp_clean) <- c("year","population","percent change")
+print(hp_clean)
+```
+
+```{r}
+adjacent <- html_nodes(gbc, xpath =
+                         '//*[@id="mw-content-text"]/div[1]/div[13]/table/tbody/tr[2]/td/div/table')
+adjacent2 <- html_table(adjacent)
+adjacent3 <- as.data.frame(adjacent2)
+adjacent_east <- adjacent3[,3]
+adjacent_east <- adjacent_east[adjacent_east != ""]
+adjacent_east
+```
+
+```{r}
+east <- gsub(" ", "_", adjacent_east)
+east
+pops <- hp_clean
+```
+
+```{r}
+for(i in east) {
+  url <- paste0("https://en.wikipedia.org/wiki/", i)
+  print(url)
+}
+```
+
+```{r}
+for(i in east) {
+  url <- paste0("https://en.wikipedia.org/wiki/", i)
+  src <- read_html(url)
+  
+  hispp <- html_nodes(src, xpath ='//*[@id="mw-content-text"]/div[1]/table[2]')
+  hispp2 <- html_table(hispp)
+  hispp3 <- as.data.frame(hispp2)
+  hispp_clean <- hispp3[-nrow(hispp3),-3]
+  names(hispp_clean) <- c("year","population","percent change")
+  
+  pops <- rbind(pops,hispp_clean)
+}
+str(pops)
+```
+
+```{r}
+wenzi <- html_nodes(gbc, xpath="//p")
+wenzi2 <- html_text(wenzi)
+descrip <- wenzi2 %>% paste(collapse = ' ')
+print(descrip)
+```
+
+
+```{r}
+descrip2 <- tibble(location = 'Grand_Boulevard', description = descrip )
+description_final <- descrip2
+
+for(i in east) {
+  url <- paste0("https://en.wikipedia.org/wiki/", i)
+  src <- read_html(url)
+  
+  des <- html_nodes(src, xpath="//p")
+  des2 <- html_text(des)
+  des3 <- des2 %>% paste(collapse = ' ')
+  
+  description_1 <- tibble(location = i, description = des3)
+  description_final <- rbind(description_final, description_1)
+}
+  
+```
+
+park is the most common words used overall.
+```{r}
+description_tokens <- description_final %>%
+  unnest_tokens(word, description)
+description_clean <- description_tokens %>% anti_join(stop_words)
+description_clean %>% count(word, sort = TRUE) %>% head(5)
+```
+
+```{r}
+description_count <- description_clean %>%
+  count(location, word, sort = TRUE) %>% 
+  group_by(location) %>%
+  mutate(proportion = n / sum(n)) %>%
+  select(-n) %>% 
+  pivot_wider(names_from = location, values_from = proportion) %>% 
+  pivot_longer(`Hyde_Park,_Chicago`:`Kenwood,_Chicago`,
+               names_to = "location", values_to = "proportion")
+  
+head(description_count)
+
+ggplot(description_count, aes(x = proportion, y = `Grand_Boulevard`, 
+                      color = abs(`Grand_Boulevard` - proportion))) +
+  geom_abline(color = "gray40", lty = 2) +
+  geom_jitter(alpha = 0.3, size = 1.5, width = 0.3, height = 0.3) +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5, size = 2.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  scale_color_gradient(low = "blue", high = "red") +
+  facet_wrap(~location, ncol = 2) +
+  theme(legend.position="none") +
+  labs(y = "Grand_Boulevard", x = NULL)
+```
+
