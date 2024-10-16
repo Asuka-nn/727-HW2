@@ -1,0 +1,217 @@
+---
+title: "727HW3"
+author: "Yuchen Ding and Kailin Xu"
+date: "2024-10-15"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Github
+<https://github.com/Asuka-nn/727-HW3.git>
+
+```{r,message=FALSE}
+library(xml2)
+library(rvest)
+library(tidyverse)
+library(robotstxt)
+library(dplyr)
+library(tidytext)
+library(scales)
+```
+
+## Web Scraping
+```{r}
+paths_allowed('https://en.wikipedia.org/wiki/Grand_Boulevard,_Chicago')
+gbc <- read_html('https://en.wikipedia.org/wiki/Grand_Boulevard,_Chicago')
+hp <- html_nodes(gbc, xpath ='//*[@id="mw-content-text"]/div[1]/table[2]')
+str(hp)
+```
+```{r}
+his_p <- html_table(hp)
+his_p2 <- as.data.frame(his_p)
+hp_clean <- his_p2[-nrow(his_p2),-3]
+names(hp_clean) <- c("year","population","percent change")
+hp_clean$area <- "Grand_Boulevard"
+print(hp_clean)
+```
+## Expanding to More Pages
+```{r}
+adjacent <- html_nodes(gbc, xpath =
+                         '//*[@id="mw-content-text"]/div[1]/div[13]/table/tbody/tr[2]/td/div/table')
+adjacent2 <- html_table(adjacent)
+adjacent3 <- as.data.frame(adjacent2)
+adjacent_east <- adjacent3[,3]
+adjacent_east <- adjacent_east[adjacent_east != ""]
+adjacent_east
+```
+
+```{r}
+east <- gsub(" ", "_", adjacent_east)
+east
+pops <- hp_clean
+```
+
+```{r}
+for(i in east) {
+  url <- paste0("https://en.wikipedia.org/wiki/", i)
+  print(url)
+}
+```
+
+```{r}
+for(i in east) {
+  url <- paste0("https://en.wikipedia.org/wiki/", i)
+  src <- read_html(url)
+  
+  hispp <- html_nodes(src, xpath ='//*[@id="mw-content-text"]/div[1]/table[2]')
+  hispp2 <- html_table(hispp)
+  hispp3 <- as.data.frame(hispp2)
+  hispp_clean <- hispp3[-nrow(hispp3),-3]
+  names(hispp_clean) <- c("year","population","percent change")
+  
+  hispp_clean <- hispp_clean %>% mutate(area = i)
+  pops <- bind_rows(pops,hispp_clean)
+  
+}
+print(pops)
+```
+
+### Use cbind
+```{r}
+pops2 <- data.frame(matrix(NA, nrow = 12, ncol = 0))
+loc <- c("Grand_Boulevard,_Chicago", east)
+
+for (i in loc) {
+  url2 <- paste0("https://en.wikipedia.org/wiki/", i)
+  src2 <- read_html(url2)
+  
+  hispp_2 <- html_nodes(src2, xpath ='//*[@id="mw-content-text"]/div[1]/table[2]')
+  hispp2_2 <- html_table(hispp_2)
+  hispp3_2 <- as.data.frame(hispp2_2)
+  hispp_clean_2 <- hispp3_2[-nrow(hispp3_2), -3]
+  names(hispp_clean_2) <- c("year", "population", "percent change")
+  
+  current_rows <- nrow(hispp_clean_2)
+  if(current_rows < 12) {
+    missing_rows <- 12 - current_rows
+  hispp_clean_2 <- rbind(hispp_clean_2, 
+                           setNames(data.frame(matrix(NA, nrow = missing_rows, ncol = 3)), 
+                                    names(hispp_clean_2)))}
+  hispp_clean_2$area <- i
+  
+  pops2 <- cbind(pops2, hispp_clean_2)
+}
+  
+  print(pops2)
+  
+```
+
+
+
+## Scraping and Analyzing Text Data
+```{r}
+wenzi <- html_nodes(gbc, xpath="//p")
+wenzi2 <- html_text(wenzi)
+descrip <- wenzi2 %>% paste(collapse = ' ')
+print(descrip)
+```
+
+```{r}
+location_data <- tibble(Location = character(), Description = character())
+
+locations <- c("Armour Square, Chicago",	"Douglas, Chicago", "Oakland, Chicago", 
+               "Fuller Park, Chicago",	"Grand Boulevard, Chicago",	"Kenwood, Chicago", 
+               "New City, Chicago", "Washington Park, Chicago",	"Hyde Park, Chicago")
+locations <- gsub(" ", "_", locations)
+location_data <- tibble(Location = character(), Description = character())
+
+for(i in locations) {
+  url <- paste0("https://en.wikipedia.org/wiki/", i)
+  src <- read_html(url)
+  
+  des <- html_nodes(src, xpath="//p")
+  des2 <- html_text(des)
+  des3 <- des2 %>% paste(collapse = ' ')
+  
+  description_1 <- tibble(Location = i, Description = des3)
+  location_data <- rbind(location_data, description_1)
+}
+
+print(location_data)
+```
+### "Park" is the most common words used overall.
+```{r}
+location_words <- location_data %>%
+  unnest_tokens(word, Description)
+
+data(stop_words) 
+location_words <- location_words %>%
+  anti_join(stop_words, by = "word")
+
+location_words %>%
+  count(Location, word, sort = TRUE)
+```
+### Similarities
+
+
+"Park" appears as one of the most frequent words across locations. "Chicago" is another common word across all locations, reflecting that all these neighborhoods are part of the broader Chicago area. "Community" and "Neighborhood" are frequently mentioned, indicating a focus on communal living.  
+
+
+### Differiences
+
+Place-specific terms: For example, "Hyde" in Hyde Park, "Kenwood" in Kenwood, and "Oakland" in Oakland are unique to their respective locations.  
+Size and Focus: Some areas, like Hyde Park and Grand Boulevard, show more diverse frequent words, which might suggest a richer historical or demographic narrative compared to smaller or less documented areas like Fuller Park or Oakland.
+```{r}
+counts <- location_words %>%
+  count(Location, word, sort = TRUE) %>%
+  group_by(Location) %>%
+  top_n(10, n)
+
+library(ggplot2)
+ggplot(counts, 
+       aes(x = reorder(word, n), y = n, 
+           fill = Location)) +
+  geom_col() +
+  facet_wrap(~ Location, scales = "free_y") +  
+  labs(x = "Word", y = "Frequency") +
+  coord_flip() +
+  theme_minimal() +
+  theme(
+    panel.spacing = unit(1, "lines"),
+    axis.text.x = element_text(size = 5),
+    axis.text.y = element_text(size = 8),
+    strip.text = element_text(size = 5),
+    legend.text = element_text(size = 10))
+  ggtitle("Most Common Words by Location")
+```
+
+```{r,out.fig.width=8, fig.height=10, warning=FALSE}
+description_count <- location_words %>%
+  count(Location, word, sort = TRUE) %>% 
+  group_by(Location) %>%
+  mutate(proportion = n / sum(n)) %>%
+  select(-n) %>% 
+  pivot_wider(names_from = Location, values_from = proportion) %>% 
+  pivot_longer(`Fuller_Park,_Chicago`:`Washington_Park,_Chicago`,
+               names_to = "Location", values_to = "proportion")
+  
+head(description_count)
+
+ggplot(description_count, aes(x = proportion, y = `Hyde_Park,_Chicago`, 
+                      color = abs(`Hyde_Park,_Chicago` - proportion))) +
+  geom_abline(color = "gray40", lty = 2) +
+  geom_jitter(alpha = 0.3, size = 1.5, width = 0.3, height = 0.3) +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5, size = 2.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  scale_color_gradient(low = "blue", high = "red") +
+  facet_wrap(~Location, ncol = 2) +
+  theme(legend.position="none") +
+  labs(y = "Hyde_Park,_Chicago", x = NULL)
+```
+
